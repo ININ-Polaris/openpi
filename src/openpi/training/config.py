@@ -548,6 +548,7 @@ class TrainConfig:
 
 
 # Use `get_config` if you need to get a config by name in your code.
+# 如果你需要在代码中按名称获取配置，请使用 `get_config`。
 _CONFIGS = [
     #
     # Inference Aloha configs.
@@ -639,31 +640,53 @@ _CONFIGS = [
     # are using, and other hyperparameters like how many training steps to run or what learning rate to use.
     # For your own dataset, you can copy this class and modify the dataset name, and data transforms based on
     # the comments below.
+    #
+    # 微调 Libero 配置。
+    #
+    # 这些训练配置定义了在你自己的数据集上微调基础模型的超参数。
+    # 它们用于定义关键元素，例如你要训练的数据集、所使用的基础检查点，
+    # 以及其他超参数，如训练步数或学习率。
+    # 对于你自己的数据集，你可以复制这个类并修改数据集名称，
+    # 并根据下面的注释修改数据变换。
     TrainConfig(
         # Change the name to reflect your model and dataset.
+        # 将名称改为与你的模型和数据集相对应的名字。
         name="pi0_libero",
         # Here you define the model config -- In this example we use pi0 as the model
         # architecture and perform *full* finetuning. in the examples below we show how to modify
         # this to perform *low-memory* (LORA) finetuning and use pi0-FAST as an alternative architecture.
+        # 在这里定义模型配置 —— 在这个示例中，我们使用 pi0 作为模型
+        # 架构，并进行*完整*微调。在下面的示例中，我们展示了如何修改
+        # 来执行*低内存*（LoRA）微调，并使用 pi0-FAST 作为替代架构。
         model=pi0_config.Pi0Config(),
         # Here you define the dataset you are training on. In this example we use the Libero
         # dataset. For your own dataset, you can change the repo_id to point to your dataset.
         # Also modify the DataConfig to use the new config you made for your dataset above.
+        # 在这里定义你正在训练的数据集。在本例中，我们使用 Libero
+        # 数据集。对于你自己的数据集，可以将 repo_id 改为指向你的数据集。
+        # 同时修改 DataConfig 以使用你为数据集新建的配置。
         data=LeRobotLiberoDataConfig(
             repo_id="physical-intelligence/libero",
             base_config=DataConfig(
                 # This flag determines whether we load the prompt (i.e. the task instruction) from the
                 # ``task`` field in the LeRobot dataset. If set to True, the prompt will show up in
                 # a field called ``prompt`` in the input dict. The recommended setting is True.
+                # 该标志决定是否从 LeRobot 数据集的 ``task`` 字段加载提示
+                # （即任务指令）。如果设置为 True，提示会出现在输入字典中的
+                # ``prompt`` 字段。推荐设置为 True。
                 prompt_from_task=True,
             ),
             extra_delta_transform=True,
         ),
         # Here you define which pre-trained checkpoint you want to load to initialize the model.
         # This should match the model config you chose above -- i.e. in this case we use the pi0 base model.
+        # 在这里定义你想加载的预训练检查点，用于初始化模型。
+        # 这应与上面选择的模型配置相匹配 —— 例如这里我们使用 pi0 基础模型。
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
         # Below you can define other hyperparameters like the learning rate, number of training steps, etc.
         # Check the base TrainConfig class for a full list of available hyperparameters.
+        # 下面可以定义其他超参数，如学习率、训练步数等。
+        # 查看基础 TrainConfig 类以获取完整的可用超参数列表。
         num_train_steps=30_000,
     ),
     TrainConfig(
@@ -681,10 +704,14 @@ _CONFIGS = [
         # We have a convenience function in the model config that returns the default freeze filter
         # for the given model config for LoRA finetuning. Just make sure it matches the model config
         # you chose above.
+        # 冻结过滤器定义了在训练过程中应冻结哪些参数。
+        # 在模型配置中有一个便捷函数，它会返回给定模型配置的 LoRA 微调
+        # 默认冻结过滤器。只需确保它与你上面选择的模型配置相匹配。
         freeze_filter=pi0_config.Pi0Config(
             paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"
         ).get_freeze_filter(),
         # Turn off EMA for LoRA finetuning.
+        # 关闭 LoRA 微调的 EMA。
         ema_decay=None,
     ),
     TrainConfig(
@@ -699,6 +726,15 @@ _CONFIGS = [
         # max_token_len). A good rule of thumb is to use approx 180 for single-arm robots, and approx 250 for
         # two-arm robots. Generally, err on the lower side here first, and potentially increase the value if
         # you see many warnings being thrown during training.
+        # 这是一个加载 pi0-FAST 模型进行完整微调的示例。
+        # 修改 action_dim 和 action_horizon 以匹配你的数据集
+        # （action horizon 等于期望的动作块长度）。
+        # max_token_len 是模型可以处理的最大（非图像）token 数量。
+        # 这包括分词后的提示、身体状态以及（FAST 分词的）动作 token。
+        # 如果值太小，可能会截断序列末尾的 token（代码会抛出警告），
+        # 如果值太大则会浪费内存（因为我们会将每个 batch 元素填充到 max_token_len）。
+        # 一个好的经验法则是：单臂机器人约 180，双臂机器人约 250。
+        # 一般建议先偏小一些，如果训练过程中出现很多警告再适当增加。
         model=pi0_fast.Pi0FASTConfig(action_dim=7, action_horizon=10, max_token_len=180),
         data=LeRobotLiberoDataConfig(
             repo_id="physical-intelligence/libero",
