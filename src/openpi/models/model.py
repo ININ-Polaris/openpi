@@ -4,7 +4,7 @@ import dataclasses
 import enum
 import logging
 import pathlib
-from typing import Generic, TypeVar
+from typing import Any, Generic, TypeVar
 
 import augmax
 from flax import nnx
@@ -47,37 +47,40 @@ IMAGE_KEYS = (
 IMAGE_RESOLUTION = (224, 224)
 
 
-# Data format
-#
-# Data transforms produce the model input as a nested dictionary which is later converted
-# into `Obesrvation` and `Actions` objects. See below.
-#
-# In the dictory form, this data should look like:
+# 数据格式说明
+
+# 数据变换（transforms）将模型的输入构造成一个嵌套字典，之后再被转换为 `Observation` 和 `Actions` 对象。如下所示：
+
+# 在字典形式中，数据结构应如下：
 # {
-#     # Observation data.
+#     # 观测（Observation） 相关数据
 #     "image": {
-#         "base_0_rgb": (float32|uint8)[*b, h, w, 3],  # RGB image in [-1, 1] or [0, 255]
-#         ...  # Additional camera views
+#         "base_0_rgb": (float32|uint8)[*b, h, w, 3],  # RGB 图像，像素值可为 [-1, 1] 或 [0, 255]
+#         …  # 其他相机视图
 #     },
 #     "image_mask": {
-#         "base_0_rgb": bool[*b],  # True if image is valid
-#         ...  # Masks for additional views
+#         "base_0_rgb": bool[*b],  # 若对应视图的图像有效，则为 True
+#         …  # 其他视图的 mask
 #     },
-#     "state": float32[*b, s],  # Low-dimensional robot state
-#     "tokenized_prompt": int32[*b, l],  # Optional, tokenized language prompt
-#     "tokenized_prompt_mask": bool[*b, l],  # Optional, mask for tokenized prompt
-#     "token_ar_mask": int32[*b, l],  # Optional, autoregressive mask for FAST model
-#     "token_loss_mask": bool[*b, l],  # Optional, loss mask for FAST model
-#
-#      # Actions data.
-#      "actions": float32[*b ah ad]
+#     "state": float32[*b, s],  # 低维机器人状态向量
+#     "tokenized_prompt": int32[*b, l],  # （可选）语言提示 prompt 的 token 化表示
+#     "tokenized_prompt_mask": bool[*b, l],  # （可选）tokenized prompt 的 mask
+#     "token_ar_mask": int32[*b, l],  # （可选）用于 FAST 模型的自回归掩码
+#     "token_loss_mask": bool[*b, l],  # （可选）用于 FAST 模型的损失掩码
+
+#     # 操作（Actions） 相关数据
+#     "actions": float32[*b, ah, ad]
 # }
-# where:
-#   *b = batch dimensions
-#   h,w = image height/width
-#   s = state dimension
-#   l = sequence length
-#
+
+# 其中：
+#   *b = 批次维度（batch dimensions）
+#   h, w = 图像的高度和宽度
+#   s = 状态向量的维度
+#   l = 序列长度（token 序列长度）
+#   ah = 动作头数（action heads）
+#   ad = 每个头的动作维度
+
+
 @at.typecheck
 @struct.dataclass
 class Observation(Generic[ArrayT]):
@@ -149,8 +152,21 @@ def preprocess_observation(
     image_keys: Sequence[str] = IMAGE_KEYS,
     image_resolution: tuple[int, int] = IMAGE_RESOLUTION,
 ) -> Observation:
-    """Preprocess the observations by performing image augmentations (if train=True), resizing (if necessary), and
-    filling in a default image mask (if necessary).
+    """对 Observation 进行预处理，包括以下几步：
+
+    1. 图像增强（如果 train=True）：对图像做随机裁剪、旋转、色彩扰动等变换；
+    2. 图像尺寸调整（如果观测中的图像尺寸与目标分辨率不一致）：使用填充或缩放将其调整为给定的 image_resolution；
+    3. 填充默认的图像掩码（如果 observation.image_masks 中缺少对应 key）：对于缺失的图像 mask，默认设置为全 True（即不进行遮掩）。
+
+    参数：
+        rng: 随机数生成器种子或状态，用于图像增强时生成随机变换；
+        observation: 原始的 Observation 对象；
+        train: 是否以训练模式进行增强（仅在 True 时应用增强）；
+        image_keys: 要处理的图像 key 列表（即 observation.images 中要处理的那些键）；
+        image_resolution: 目标图像分辨率 (高度, 宽度)；
+
+    返回：
+        一个新的 Observation 对象，其 images 和 image_masks 已经过上述预处理。
     """
 
     if not set(image_keys).issubset(observation.images):
@@ -160,7 +176,7 @@ def preprocess_observation(
 
     out_images = {}
     for key in image_keys:
-        image = observation.images[key]
+        image: at.Float[at.Array, "h w c"] = observation.images[key]
         if image.shape[1:3] != image_resolution:
             logger.info(f"Resizing image {key} from {image.shape[1:3]} to {image_resolution}")
             image = image_tools.resize_with_pad(image, *image_resolution)
@@ -180,8 +196,11 @@ def preprocess_observation(
             transforms += [
                 augmax.ColorJitter(brightness=0.3, contrast=0.4, saturation=0.5),
             ]
+            if rng is None:
+                raise ValueError("Rng must be given when train is True.")
+
             sub_rngs = jax.random.split(rng, image.shape[0])
-            image = jax.vmap(augmax.Chain(*transforms))(sub_rngs, image)
+            image: at.Float[Any, "h w c"] = jax.vmap(augmax.Chain(*transforms))(sub_rngs, image)
 
             # Back to [-1, 1].
             image = image * 2.0 - 1.0
@@ -210,32 +229,31 @@ def preprocess_observation(
 
 @dataclasses.dataclass(frozen=True)
 class BaseModelConfig(abc.ABC):
-    """Configuration shared by all models. Specific models should inherit from this class, and implement the `create`
-    method to create the corresponding model.
-    """
+    """所有模型共用的配置。具体模型应继承此类，并实现 `create` 方法以创建对应的模型。"""
 
-    # Action space dimension.
+    # 动作空间的维度
     action_dim: int
-    # Action sequence length.
+    # 动作序列的长度
     action_horizon: int
-    # Tokenized prompt maximum length.
+    # 分词后 prompt 的最大长度
     max_token_len: int
 
     @property
     @abc.abstractmethod
     def model_type(self) -> ModelType:
-        """The model type."""
+        """模型的类型。"""
 
     @abc.abstractmethod
     def create(self, rng: at.KeyArrayLike) -> "BaseModel":
-        """Create a new model, initializing parameters."""
+        """创建一个新的模型，并初始化参数。"""
 
     def load(self, params: at.Params, *, remove_extra_params: bool = True) -> "BaseModel":
-        """Create a model with the given parameters."""
+        """用给定的参数构建模型（加载参数）。"""
         model = nnx.eval_shape(self.create, jax.random.key(0))
         graphdef, state = nnx.split(model)
         if remove_extra_params:
-            params = ocp.transform_utils.intersect_trees(state.to_pure_dict(), params)
+            # 用于正交两颗 PyTree
+            params = ocp.transform_utils.intersect_trees(state.to_pure_dict(), params)  # type: ignore
         at.check_pytree_equality(expected=state.to_pure_dict(), got=params, check_shapes=True, check_dtypes=False)
         state.replace_by_pure_dict(params)
         return nnx.merge(graphdef, state)
@@ -248,7 +266,7 @@ class BaseModelConfig(abc.ABC):
 
     @abc.abstractmethod
     def inputs_spec(self, *, batch_size: int = 1) -> tuple[Observation, Actions]:
-        """Returns the input specification for the model. Values are jax.ShapeDtypeStruct."""
+        """返回模型的输入规格（spec）。这些规格是 jax.ShapeDtypeStruct 类型。"""
 
     def fake_obs(self, batch_size: int = 1) -> Observation:
         observation_spec, _ = self.inputs_spec(batch_size=batch_size)
@@ -261,8 +279,9 @@ class BaseModelConfig(abc.ABC):
 
 @dataclasses.dataclass
 class BaseModel(nnx.Module, abc.ABC):
-    """Base class for all model implementations. Specific models should inherit from this class. They should call
-    super().__init__() to initialize the shared attributes (action_dim, action_horizon, and max_token_len).
+    """
+    所有模型实现的基类。具体的模型应当继承这个类。它们应该调用
+    super().__init__() 来初始化共享属性（action_dim, action_horizon, 和 max_token_len）。
     """
 
     action_dim: int
@@ -278,7 +297,6 @@ class BaseModel(nnx.Module, abc.ABC):
         *,
         train: bool = False,
     ) -> at.Float[at.Array, "*b ah"]: ...
-
     @abc.abstractmethod
     def sample_actions(self, rng: at.KeyArrayLike, observation: Observation, **kwargs) -> Actions: ...
 
@@ -290,19 +308,19 @@ def restore_params(
     dtype: jnp.dtype | None = None,
     sharding: jax.sharding.Sharding | None = None,
 ) -> at.Params:
-    """Restores unstructured params PyTree from a checkpoint.
+    """从检查点恢复无结构参数 PyTree
 
-    This works with checkpoints saved with `save_state` during openpi training (see `training/checkpoints.py`) as
-    well as pre-trained checkpoints released for openpi.
+    这个函数能处理在 openpi 训练过程中通过 `save_state` 保存的检查点（参见 `training/checkpoints.py`），
+    也能处理为 openpi 发布的预训练检查点
 
-    Args:
-        params_path: The local path to the checkpoint directory.
-        restore_type: The type to restore the params as. Can be set to `np.ndarray` to load the params as a numpy array.
-        dtype: The dtype to restore all params as. If not provided, will use the original dtype from the checkpoint.
-        sharding: The sharding to use for the params. If not provided, the params will be replicated across all devices.
+    参数:
+        params_path: 检查点的路径
+        restore_type: 恢复参数时使用的类型。可以设为 `np.ndarray`，将参数加载为 numpy 数组。
+        dtype: 用于恢复所有参数的数据类型 (dtype)。如果未提供，则使用检查点中原有的 dtype。
+        sharding: 参数的分片 (sharding) 方式。如果未提供，参数将在所有设备上被复制 (replicated)。
 
-    Returns:
-        The restored params.
+    返回:
+        恢复后的参数 (params)。
     """
     params_path = pathlib.Path(params_path).resolve() if not str(params_path).startswith("gs://") else params_path
 
@@ -317,15 +335,16 @@ def restore_params(
         params = ckptr.restore(
             params_path,
             ocp.args.PyTreeRestore(
-                item=item,
-                restore_args=jax.tree.map(
+                item=item,  # type: ignore
+                restore_args=jax.tree.map(  # type: ignore
                     lambda _: ocp.ArrayRestoreArgs(sharding=sharding, restore_type=restore_type, dtype=dtype), item
                 ),
             ),
         )["params"]
 
-    # If the params were saved with `save_state` during openpi training, every key path will end with "value", which is
-    # added by `nnx.State`. We remove the "value" suffix here and always return what NNX calls a "pure dict".
+    # 如果这些参数是用 openpi 训练过程中的 `save_state` 保存的，
+    # 则每一个键路径 (key path) 最后会以 "value" 结尾，这是由 `nnx.State` 添加的。
+    # 我们在这里移除 "value" 后缀，并始终返回 NNX 所说的 “纯 dict”。
     flat_params = traverse_util.flatten_dict(params)
     if all(kp[-1] == "value" for kp in flat_params):
         flat_params = {kp[:-1]: v for kp, v in flat_params.items()}

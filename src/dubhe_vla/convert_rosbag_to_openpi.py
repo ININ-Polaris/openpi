@@ -5,8 +5,8 @@ import shutil
 from typing import Literal, cast
 
 import cv2
-from lerobot.common.constants import HF_LEROBOT_HOME
-from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.constants import HF_LEROBOT_HOME
+from lerobot.datasets.lerobot_dataset import LeRobotDataset
 import numpy as np
 from rosbags.highlevel import AnyReader
 
@@ -102,11 +102,11 @@ def create_empty_dataset(
     repo_id: str,
     robot_type: str,
     mode="image",
-    override: bool = False,  # noqa: FBT001, FBT002
+    overwrite: bool = False,  # noqa: FBT001, FBT002
     *,
     dataset_config: DatasetConfig = DEFAULT_DATASET_CONFIG,
 ) -> LeRobotDataset:
-    if override and Path(HF_LEROBOT_HOME / repo_id).exists():
+    if overwrite and Path(HF_LEROBOT_HOME / repo_id).exists():
         shutil.rmtree(HF_LEROBOT_HOME / repo_id)
 
     motors = [
@@ -129,25 +129,21 @@ def create_empty_dataset(
     ]
 
     cameras = {  # H W C
-        "cam_mid": (480, 640, 3),
-        "cam_left_wrist": (240, 320, 3),
-        "cam_right_wrist": (240, 320, 3),
+        "cam_mid": (480, 848, 3),
+        "cam_left_wrist": (240, 424, 3),
+        "cam_right_wrist": (240, 424, 3),
     }
 
     features = {
         "observation.state": {
             "dtype": "float32",
             "shape": (len(motors),),
-            "names": [
-                motors,
-            ],
+            "names": motors,
         },
         "action": {
             "dtype": "float32",
             "shape": (len(motors),),
-            "names": [
-                motors,
-            ],
+            "names": motors,
         },
     }
 
@@ -212,7 +208,11 @@ def load_raw_episode_data(
         for connection, timestamp, raw in reader.messages(connections=connections):
             topic = connection.topic
             msg_type = connection.msgtype
-            msg = reader.deserialize(raw, msg_type)
+            try:
+                msg = reader.deserialize(raw, msg_type)
+            except AssertionError:
+                print(f"反序列化 {ep_path}[{topic}] 时失败")
+                raise
             t_sec = timestamp * NS2S
 
             if topic in images_topics and msg_type == "sensor_msgs/msg/CompressedImage":
@@ -325,6 +325,7 @@ def populate_dataset(
     for ep_idx in tqdm.tqdm(episodes):
         ep_path = rosbag_files[ep_idx]
         imgs_per_cam, state, action = load_raw_episode_data(ep_path)
+
         num_frames = state.shape[0]
 
         img_frame_counts = [img_array.shape[0] for img_array in imgs_per_cam.values()]
@@ -339,10 +340,10 @@ def populate_dataset(
         print(f"[INFO] Synced num_frames: {num_frames}")
 
         for i in range(num_frames):
-            frame = {"observation.state": state[i], "action": action[i], "task": task}
+            frame = {"observation.state": state[i], "action": action[i]}
             for camera, img_array in imgs_per_cam.items():
                 frame[f"observation.images.{camera}"] = img_array[i]
-            dataset.add_frame(frame)
+            dataset.add_frame(frame, task=task)
         dataset.save_episode()
 
     return dataset
@@ -353,7 +354,7 @@ def port_dubhe(
     repo_id: str,
     raw_repo_id: str | None = None,
     task: str = "debug",
-    override: bool = False,
+    overwrite: bool = False,  # noqa: FBT001, FBT002
     *,
     episodes: list[int] | None = None,
     mode: Literal["video", "image"] = "image",
@@ -366,7 +367,7 @@ def port_dubhe(
     print(rosbag_files)
 
     dataset = create_empty_dataset(
-        repo_id, robot_type="dubhe", mode=mode, dataset_config=dataset_config, override=override
+        repo_id, robot_type="dubhe", mode=mode, dataset_config=dataset_config, overwrite=overwrite
     )
     print(dataset)
 

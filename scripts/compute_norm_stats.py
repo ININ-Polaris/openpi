@@ -13,10 +13,10 @@ import openpi.models.model as _model
 import openpi.shared.normalize as normalize
 import openpi.training.config as _config
 import openpi.training.data_loader as _data_loader
-import openpi.transforms as transforms
+import openpi.transforms as _transforms
 
 
-class RemoveStrings(transforms.DataTransformFn):
+class RemoveStrings(_transforms.DataTransformFn):
     def __call__(self, x: dict) -> dict:
         return {k: v for k, v in x.items() if not np.issubdtype(np.asarray(v).dtype, np.str_)}
 
@@ -101,6 +101,8 @@ def main(config_name: str, max_frames: int | None = None):
 
     keys = ["state", "actions"]
     stats = {key: normalize.RunningStats() for key in keys}
+
+    print(stats)
 
     for batch in tqdm.tqdm(data_loader, total=num_batches, desc="Computing stats"):
         for key in keys:

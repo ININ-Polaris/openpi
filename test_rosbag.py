@@ -10,7 +10,7 @@ from sensor_msgs.msg import CompressedImage
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Float64
 
-bagpath = Path("./data/test_bag/debug_bag_1")
+bagpath = Path("./data/test_bag/debug_bag_2")
 typestore = get_typestore(Stores.ROS2_HUMBLE)
 
 

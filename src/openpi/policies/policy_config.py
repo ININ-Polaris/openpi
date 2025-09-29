@@ -10,17 +10,17 @@ import openpi.policies.policy as _policy
 import openpi.shared.download as download
 from openpi.training import checkpoints as _checkpoints
 from openpi.training import config as _config
-import openpi.transforms as transforms
+import openpi.transforms as _transforms
 
 
 def create_trained_policy(
     train_config: _config.TrainConfig,
     checkpoint_dir: pathlib.Path | str,
     *,
-    repack_transforms: transforms.Group | None = None,
+    repack_transforms: _transforms.Group | None = None,
     sample_kwargs: dict[str, Any] | None = None,
     default_prompt: str | None = None,
-    norm_stats: dict[str, transforms.NormStats] | None = None,
+    norm_stats: dict[str, _transforms.NormStats] | None = None,
     pytorch_device: str | None = None,
 ) -> _policy.Policy:
     """Create a policy from a trained checkpoint.
@@ -42,7 +42,7 @@ def create_trained_policy(
         The function automatically detects whether the model is PyTorch-based by checking for the
         presence of "model.safensors" in the checkpoint directory.
     """
-    repack_transforms = repack_transforms or transforms.Group()
+    repack_transforms = repack_transforms or _transforms.Group()
     checkpoint_dir = download.maybe_download(str(checkpoint_dir))
 
     # Check if this is a PyTorch model by looking for model.safetensors
@@ -76,14 +76,14 @@ def create_trained_policy(
         model,
         transforms=[
             *repack_transforms.inputs,
-            transforms.InjectDefaultPrompt(default_prompt),
+            _transforms.InjectDefaultPrompt(default_prompt),
             *data_config.data_transforms.inputs,
-            transforms.Normalize(norm_stats, use_quantiles=data_config.use_quantile_norm),
+            _transforms.Normalize(norm_stats, use_quantiles=data_config.use_quantile_norm),
             *data_config.model_transforms.inputs,
         ],
         output_transforms=[
             *data_config.model_transforms.outputs,
-            transforms.Unnormalize(norm_stats, use_quantiles=data_config.use_quantile_norm),
+            _transforms.Unnormalize(norm_stats, use_quantiles=data_config.use_quantile_norm),
             *data_config.data_transforms.outputs,
             *repack_transforms.outputs,
         ],

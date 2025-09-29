@@ -7,7 +7,7 @@ from typing import Literal, Protocol, SupportsIndex, TypeVar
 
 import jax
 import jax.numpy as jnp
-import lerobot.common.datasets.lerobot_dataset as lerobot_dataset
+import lerobot.datasets.lerobot_dataset as lerobot_dataset
 import numpy as np
 import torch
 
@@ -134,6 +134,7 @@ def create_torch_dataset(
     repo_id = data_config.repo_id
     if repo_id is None:
         raise ValueError("Repo ID is not set. Cannot create dataset.")
+
     if repo_id == "fake":
         return FakeDataset(model_config, num_samples=1024)
 
@@ -463,7 +464,9 @@ class TorchDataLoader:
                 num_items += 1
                 # For JAX, convert to sharded arrays; for PyTorch, return torch tensors
                 if self._sharding is not None:
-                    yield jax.tree.map(lambda x: jax.make_array_from_process_local_data(self._sharding, x), batch)
+                    yield jax.tree.map(
+                        lambda x, sharding=self._sharding: jax.make_array_from_process_local_data(sharding, x), batch
+                    )
                 else:
                     yield jax.tree.map(torch.as_tensor, batch)
 
