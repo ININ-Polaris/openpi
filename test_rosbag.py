@@ -10,7 +10,7 @@ from sensor_msgs.msg import CompressedImage
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Float64
 
-bagpath = Path("./data/test_bag/debug_bag_2")
+bagpath = Path("/home/charles/tmp/green_block/episode_0")
 typestore = get_typestore(Stores.ROS2_HUMBLE)
 
 
@@ -48,7 +48,7 @@ if __name__ == "__main__":
                 print("==>", cast(Float64, msg).data)
             elif connection.msgtype == "sensor_msgs/msg/JointState":
                 print(cast(JointState, msg).position.__len__())
-                print("pos ==>", cast(JointState, msg).position)
+                print("joints ==>", cast(JointState, msg).position)
             else:
                 print("Type is: ", connection.msgtype)
 

@@ -41,6 +41,8 @@ dependencies = [
     "pycryptodomex>=3.23.0",
     "gnupg>=2.3.1",
     "rosbags>=0.10.11",
+    "tensorflow>=2.15.0",
+    "tensorflow-datasets>=4.9.9",
 ]
 
 
@@ -56,6 +58,7 @@ dev = [
     "ipywidgets>=8.1.5",
     "matplotlib>=3.10.0",
     "nvidia-ml-py>=13.580.82",
+    "mypy>=1.18.2",
 ]
 rlds = [
     "dlimp",
